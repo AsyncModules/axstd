@@ -74,3 +74,8 @@ pub mod time;
 pub mod fs;
 #[cfg(feature = "net")]
 pub mod net;
+
+#[cfg(feature = "async")]
+pub mod futures;
+#[cfg(feature = "async")]
+pub use futures::async_main;

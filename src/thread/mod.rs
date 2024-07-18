@@ -12,8 +12,13 @@ use arceos_api::task as api;
 ///
 /// For single-threaded configuration (`multitask` feature is disabled), we just
 /// relax the CPU and wait for incoming interrupts.
+#[cfg(not(feature = "async"))]
 pub fn yield_now() {
     api::ax_yield_now();
+}
+#[cfg(feature = "async")]
+pub async fn yield_now() {
+    api::ax_yield_now().await;
 }
 
 /// Exits the current thread.
@@ -28,14 +33,24 @@ pub fn exit(exit_code: i32) -> ! {
 ///
 /// If one of `multitask` or `irq` features is not enabled, it uses busy-wait
 /// instead.
+#[cfg(not(feature = "async"))]
 pub fn sleep(dur: core::time::Duration) {
     sleep_until(arceos_api::time::ax_current_time() + dur);
+}
+#[cfg(feature = "async")]
+pub async fn sleep(dur: core::time::Duration) {
+    sleep_until(arceos_api::time::ax_current_time() + dur).await;
 }
 
 /// Current thread is going to sleep, it will be woken up at the given deadline.
 ///
 /// If one of `multitask` or `irq` features is not enabled, it uses busy-wait
 /// instead.
+#[cfg(not(feature = "async"))]
 pub fn sleep_until(deadline: arceos_api::time::AxTimeValue) {
     api::ax_sleep_until(deadline);
+}
+#[cfg(feature = "async")]
+pub async fn sleep_until(deadline: arceos_api::time::AxTimeValue) {
+    api::ax_sleep_until(deadline).await;
 }

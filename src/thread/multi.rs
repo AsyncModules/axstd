@@ -9,6 +9,9 @@ use core::{cell::UnsafeCell, num::NonZeroU64};
 use arceos_api::task::{self as api, AxTaskHandle};
 use axerrno::ax_err_type;
 
+#[cfg(feature = "async")]
+use core::future::Future;
+
 /// A unique identifier for a running thread.
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 pub struct ThreadId(NonZeroU64);
@@ -73,6 +76,7 @@ impl Builder {
         self
     }
 
+    #[cfg(not(feature = "async"))]
     /// Spawns a new thread by taking ownership of the `Builder`, and returns an
     /// [`io::Result`] to its [`JoinHandle`].
     ///
@@ -89,6 +93,7 @@ impl Builder {
         unsafe { self.spawn_unchecked(f) }
     }
 
+    #[cfg(not(feature = "async"))]
     unsafe fn spawn_unchecked<F, T>(self, f: F) -> io::Result<JoinHandle<T>>
     where
         F: FnOnce() -> T,
@@ -122,6 +127,59 @@ impl Builder {
             packet: my_packet,
         })
     }
+
+    #[cfg(feature = "async")]
+    /// Spawns a new thread by taking ownership of the `Builder`, and returns an
+    /// [`io::Result`] to its [`JoinHandle`].
+    ///
+    /// The spawned thread may outlive the caller (unless the caller thread
+    /// is the main thread; the whole process is terminated when the main
+    /// thread finishes). The join handle can be used to block on
+    /// termination of the spawned thread.
+    pub fn spawn<F, T, M>(self, f: F) -> io::Result<JoinHandle<T>>
+    where
+        F: FnOnce() -> M + Send + 'static,
+        M: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        unsafe { self.spawn_unchecked(f) }
+    }
+
+    #[cfg(feature = "async")]
+    unsafe fn spawn_unchecked<F, T, M>(self, f: F) -> io::Result<JoinHandle<T>>
+    where
+        F: FnOnce() -> M + Send + 'static,
+        M: Future<Output = T> + Send + 'static,
+        T: Send + 'static,
+    {
+        let name = self.name.unwrap_or_default();
+        let stack_size = self
+            .stack_size
+            .unwrap_or(arceos_api::config::TASK_STACK_SIZE);
+
+        let my_packet = Arc::new(Packet {
+            result: UnsafeCell::new(None),
+        });
+        let their_packet = my_packet.clone();
+
+        let main = move || async {
+            let ret = f().await;
+            // SAFETY: `their_packet` as been built just above and moved by the
+            // closure (it is an Arc<...>) and `my_packet` will be stored in the
+            // same `JoinHandle` as this closure meaning the mutation will be
+            // safe (not modify it and affect a value far away).
+            unsafe { *their_packet.result.get() = Some(ret) };
+            drop(their_packet);
+            0
+        };
+
+        let task = api::ax_spawn(main(), name, stack_size);
+        Ok(JoinHandle {
+            thread: Thread::from_id(task.id()),
+            native: task,
+            packet: my_packet,
+        })
+    }
 }
 
 /// Gets a handle to the thread that invokes it.
@@ -139,9 +197,20 @@ pub fn current() -> Thread {
 /// [`arceos_api::config::TASK_STACK_SIZE`].
 ///
 /// [`join`]: JoinHandle::join
+#[cfg(not(feature = "async"))]
 pub fn spawn<T, F>(f: F) -> JoinHandle<T>
 where
     F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    Builder::new().spawn(f).expect("failed to spawn thread")
+}
+
+#[cfg(feature = "async")]
+pub fn spawn<T, F, M>(f: F) -> JoinHandle<T>
+where
+    F: FnOnce() -> M + Send + 'static,
+    M: Future<Output = T> + Send + 'static,
     T: Send + 'static,
 {
     Builder::new().spawn(f).expect("failed to spawn thread")
@@ -173,12 +242,24 @@ impl<T> JoinHandle<T> {
         &self.thread
     }
 
+    
     /// Waits for the associated thread to finish.
     ///
     /// This function will return immediately if the associated thread has
     /// already finished.
+    #[cfg(not(feature = "async"))]
     pub fn join(mut self) -> io::Result<T> {
         api::ax_wait_for_exit(self.native).ok_or_else(|| ax_err_type!(BadState))?;
+        Arc::get_mut(&mut self.packet)
+            .unwrap()
+            .result
+            .get_mut()
+            .take()
+            .ok_or_else(|| ax_err_type!(BadState))
+    }
+    #[cfg(feature = "async")]
+    pub async fn join(mut self) -> io::Result<T> {
+        api::ax_wait_for_exit(self.native).await.ok_or_else(|| ax_err_type!(BadState))?;
         Arc::get_mut(&mut self.packet)
             .unwrap()
             .result
