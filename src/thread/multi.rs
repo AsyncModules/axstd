@@ -259,7 +259,7 @@ impl<T> JoinHandle<T> {
     }
     #[cfg(feature = "async")]
     pub async fn join(mut self) -> io::Result<T> {
-        api::ax_wait_for_exit(self.native).await.ok_or_else(|| ax_err_type!(BadState))?;
+        api::ax_async_wait_for_exit(self.native).await.ok_or_else(|| ax_err_type!(BadState))?;
         Arc::get_mut(&mut self.packet)
             .unwrap()
             .result

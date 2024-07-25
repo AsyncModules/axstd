@@ -42,7 +42,7 @@ multitask = ["arceos_api/multitask", "axfeat/multitask"]
 sched_fifo = ["axfeat/sched_fifo"]
 sched_rr = ["axfeat/sched_rr", "arch_boot/preempt"]
 sched_cfs = ["axfeat/sched_cfs", "arch_boot/preempt"]
-async = ["arceos_api/async", "axasync_macros"]
+async = ["arceos_api/async", "axasync_macros", "arch_boot/async"]
 
 # File system
 fs = ["arceos_api/fs", "axfeat/fs"]
